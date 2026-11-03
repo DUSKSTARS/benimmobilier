@@ -94,7 +94,7 @@ $returnTo = 'favoris.php';
 ?>
 <!DOCTYPE html>
 <html lang="fr">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mes favoris — Habita</title><link rel="stylesheet" href="bootstrap-5.2.3-dist/css/bootstrap.min.css"><link rel="stylesheet" href="css/styles.css?v=6"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mes favoris — Habita</title><link rel="stylesheet" href="bootstrap-5.2.3-dist/css/bootstrap.min.css"><link rel="stylesheet" href="css/styles.css?v=9"></head>
 <body>
 <?php require __DIR__ . '/nav.php'; ?>
 <main class="section page-section">

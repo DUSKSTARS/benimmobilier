@@ -159,7 +159,7 @@ $fieldValue = static function (string $field, $default = '') use ($listing): str
 ?>
 <!DOCTYPE html>
 <html lang="fr">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Déposer une annonce — Habita</title><link rel="stylesheet" href="bootstrap-5.2.3-dist/css/bootstrap.min.css"><link rel="stylesheet" href="css/styles.css?v=8"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Déposer une annonce — Habita</title><link rel="stylesheet" href="bootstrap-5.2.3-dist/css/bootstrap.min.css"><link rel="stylesheet" href="css/styles.css?v=9"></head>
 <body>
 <?php require __DIR__ . '/nav.php'; ?>
 <main class="section page-section form-page">

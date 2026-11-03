@@ -83,7 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Connexion administrateur — Habita</title>
     <link rel="stylesheet" href="../bootstrap-5.2.3-dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="../css/styles.css?v=7">
+    <link rel="stylesheet" href="../css/styles.css?v=9">
 </head>
 <body class="auth-page">
 <header class="site-header">

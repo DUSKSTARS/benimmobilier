@@ -301,7 +301,6 @@ h1, h2, h3, .brand, .property-title { font-family: 'Manrope', sans-serif; }
     .nav-wrap { width: min(100% - 40px, 760px); gap: 15px; }
     .main-nav { gap: 15px; }
     .nav-actions { gap: 11px; }
-    .nav-logout { display: none; }
     .section, .hero-content, .footer-inner { width: calc(100% - 40px); }
     .property-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .hero-note { right: 20px; }

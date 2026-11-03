@@ -22,6 +22,14 @@ $statement = $db->query(
      ORDER BY FIELD(p.status, "pending", "rejected", "published", "archived"), p.created_at DESC'
 );
 $properties = $statement->fetchAll();
+$paymentsStatement = $db->query(
+    'SELECT mp.reference, mp.amount, mp.operator, mp.phone, mp.created_at, p.title
+     FROM momo_payments mp
+     JOIN properties p ON p.id = mp.property_id
+     WHERE mp.status = "simulated"
+     ORDER BY mp.created_at DESC'
+);
+$simulatedPayments = $paymentsStatement->fetchAll();
 $usersStatement = $db->query(
     'SELECT u.id, u.first_name, u.last_name, u.email, u.phone, u.bio, u.profile_photo, u.role, u.created_at,
         COUNT(p.id) AS property_count
@@ -39,7 +47,7 @@ $flash = flash_message();
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Administration — Habita</title>
     <link rel="stylesheet" href="../bootstrap-5.2.3-dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="../css/styles.css?v=6">
+    <link rel="stylesheet" href="../css/styles.css?v=9">
 </head>
 <body>
 <header class="site-header">
@@ -132,6 +140,24 @@ $flash = flash_message();
     <?php else: ?>
         <div class="empty-state"><h3>Aucune annonce pour le moment.</h3><p>Les annonces publiées apparaîtront ici.</p></div>
     <?php endif; ?>
+    <section class="admin-users-section">
+        <div class="panel-heading"><div><span class="eyebrow">PAIEMENTS DE DÉMONSTRATION</span><h2 class="admin-panel-title">Achats simulés (<?= count($simulatedPayments) ?>)</h2></div></div>
+        <?php if ($simulatedPayments): ?>
+            <div class="admin-users-list">
+                <?php foreach ($simulatedPayments as $payment): ?>
+                    <article class="admin-user">
+                        <div class="admin-user-info">
+                            <strong><?= e($payment['title']) ?> · <?= e(number_format((float) $payment['amount'], 0, ',', ' ') . ' FCFA') ?></strong>
+                            <span><?= e($payment['operator']) ?> · <?= e($payment['phone']) ?> · <?= e(date('d/m/Y à H:i', strtotime($payment['created_at']))) ?></span>
+                            <span>Référence : <?= e($payment['reference']) ?> · Simulation uniquement, aucun paiement réel.</span>
+                        </div>
+                    </article>
+                <?php endforeach; ?>
+            </div>
+        <?php else: ?>
+            <div class="empty-state"><p>Aucun achat simulé pour le moment.</p></div>
+        <?php endif; ?>
+    </section>
     <section class="admin-users-section">
         <div class="panel-heading"><div><span class="eyebrow">COMPTES ET COORDONNÉES</span><h2 class="admin-panel-title">Tous les utilisateurs (<?= count($users) ?>)</h2></div></div>
         <?php if ($users): ?>

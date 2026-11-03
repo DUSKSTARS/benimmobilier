@@ -3,7 +3,8 @@ require_once __DIR__ . '/includes/app.php';
 
 $search = isset($_GET['q']) && is_string($_GET['q']) ? trim($_GET['q']) : '';
 $type = $_GET['type'] ?? '';
-$maxPrice = filter_input(INPUT_GET, 'max_price', FILTER_VALIDATE_INT);
+$minPrice = filter_input(INPUT_GET, 'min_price', FILTER_VALIDATE_INT);
+$minPrice = is_int($minPrice) ? max(5000, $minPrice) : 5000;
 $conditions = ["p.status = 'published'"];
 $parameters = [];
 
@@ -18,10 +19,8 @@ if (in_array($type, ['sale', 'rent'], true)) {
     $conditions[] = 'p.transaction_type = :type';
     $parameters['type'] = $type;
 }
-if ($maxPrice !== false && $maxPrice !== null && $maxPrice > 0) {
-    $conditions[] = 'p.price <= :max_price';
-    $parameters['max_price'] = $maxPrice;
-}
+$conditions[] = 'p.price >= :min_price';
+$parameters['min_price'] = $minPrice;
 
 $statement = Database::connect()->prepare(
     'SELECT p.*, u.first_name, u.last_name,
@@ -42,7 +41,7 @@ $user = current_user();
     <meta name="description" content="Trouvez votre prochain chez-vous parmi une sélection de biens immobiliers.">
     <title>Habita — Trouvez votre prochain chez-vous</title>
     <link rel="stylesheet" href="bootstrap-5.2.3-dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="css/styles.css?v=6">
+    <link rel="stylesheet" href="css/styles.css?v=9">
 </head>
 <body>
 <?php require __DIR__ . '/nav.php'; ?>
@@ -66,13 +65,8 @@ $user = current_user();
                     </select>
                 </label>
                 <label class="search-field search-budget">
-                    <span>Budget maximum</span>
-                    <select name="max_price">
-                        <option value="">Sans limite</option>
-                        <option value="50000000" <?= $maxPrice === 50000000 ? 'selected' : '' ?>>50 000 000 FCFA</option>
-                        <option value="100000000" <?= $maxPrice === 100000000 ? 'selected' : '' ?>>100 000 000 FCFA</option>
-                        <option value="200000000" <?= $maxPrice === 200000000 ? 'selected' : '' ?>>200 000 000 FCFA</option>
-                    </select>
+                    <span>Budget minimum</span>
+                    <input type="number" name="min_price" min="5000" step="5000" value="<?= $minPrice ?>" placeholder="5 000 FCFA ou plus">
                 </label>
                 <button class="button button-dark search-button" type="submit"><span aria-hidden="true">⌕</span> Rechercher</button>
             </form>
