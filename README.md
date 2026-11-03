@@ -14,7 +14,7 @@ Les illustrations immobilières du site et des annonces de démonstration sont s
 
 ## Images des annonces et sécurité des comptes
 
-Chaque annonce peut téléverser jusqu’à quatre images JPG, PNG ou WebP depuis l’appareil (5 Mo maximum par image). La première image choisie est utilisée comme couverture ; les autres apparaissent dans le détail et peuvent être agrandies. Lors d’une modification, les images existantes sont conservées si aucune nouvelle image n’est choisie. `immobilier.sql` crée la table `property_images` et ajoute les colonnes nécessaires aux bases existantes.
+Chaque annonce dispose de quatre champs séparés pour téléverser des images JPG, PNG ou WebP depuis l’appareil (5 Mo maximum par image). Le premier champ fournit la couverture ; les images téléversées sont enregistrées dans `images/properties/`, et les autres apparaissent dans le détail où elles peuvent être agrandies. Lors d’une modification, les images existantes sont conservées si aucune nouvelle image n’est choisie. `immobilier.sql` crée la table `property_images` et ajoute les colonnes nécessaires aux bases existantes.
 
 Si une sélection atteint la limite PHP, augmentez `upload_max_filesize` à au moins `5M` et `post_max_size` à au moins `24M` dans la configuration PHP d’Apache, puis redémarrez Apache.
 

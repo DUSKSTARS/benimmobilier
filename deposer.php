@@ -49,8 +49,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (strlen($title) > 160 || strlen($city) > 100 || strlen($district) > 100 || strlen($description) > 5000) {
         $error = 'Certains champs dépassent la longueur autorisée.';
     } else {
+        $imageUploads = [];
+        for ($imageNumber = 1; $imageNumber <= 4; $imageNumber++) {
+            $fieldName = 'property_image_' . $imageNumber;
+            if (isset($_FILES[$fieldName]) && is_array($_FILES[$fieldName])) {
+                $imageUploads[$imageNumber] = $_FILES[$fieldName];
+            }
+        }
+
+        $hasNewImage = false;
+        foreach ($imageUploads as $imageUpload) {
+            if (($imageUpload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+                $hasNewImage = true;
+                break;
+            }
+        }
+
+        if ((!$listing || $hasNewImage)
+            && (!isset($imageUploads[1]['error']) || $imageUploads[1]['error'] === UPLOAD_ERR_NO_FILE)) {
+            $error = 'Choisissez une image principale dans le premier champ.';
+        }
+
         try {
-            $newImages = save_property_photos($_FILES['property_images'] ?? []);
+            if ($error === '') {
+                $newImages = save_property_photos($imageUploads);
+            }
         } catch (RuntimeException $exception) {
             $error = $exception->getMessage();
         }
@@ -150,10 +173,15 @@ $fieldValue = static function (string $field, $default = '') use ($listing): str
         <div class="form-row"><label>Type de transaction<select name="transaction_type" required><option value="sale" <?= $fieldValue('transaction_type', 'sale') === 'sale' ? 'selected' : '' ?>>À vendre</option><option value="rent" <?= $fieldValue('transaction_type') === 'rent' ? 'selected' : '' ?>>À louer</option></select></label><label>Type de bien<select name="property_type" required><option value="house" <?= $fieldValue('property_type', 'house') === 'house' ? 'selected' : '' ?>>Maison / villa</option><option value="apartment" <?= $fieldValue('property_type') === 'apartment' ? 'selected' : '' ?>>Appartement</option><option value="land" <?= $fieldValue('property_type') === 'land' ? 'selected' : '' ?>>Terrain</option><option value="commercial" <?= $fieldValue('property_type') === 'commercial' ? 'selected' : '' ?>>Local commercial</option></select></label></div>
         <div class="form-row"><label>Prix en FCFA<input type="number" name="price" min="1" step="1" required value="<?= e($fieldValue('price')) ?>"></label><label>Surface en m²<input type="number" name="area" min="1" step="1" required value="<?= e($fieldValue('area')) ?>"></label><label>Chambres<input type="number" name="bedrooms" min="0" step="1" required value="<?= e($fieldValue('bedrooms', '0')) ?>"></label></div>
         <div class="form-row"><label>Ville<input name="city" maxlength="100" required placeholder="Ex. Cotonou" value="<?= e($fieldValue('city')) ?>"></label><label>Quartier<input name="district" maxlength="100" placeholder="Ex. Haie Vive" value="<?= e($fieldValue('district')) ?>"></label></div>
-        <label>Photos du bien
-            <input id="property-images" type="file" name="property_images[]" accept="image/jpeg,image/png,image/webp" multiple <?= $listingImages ? '' : 'required' ?>>
-            <small><?= $listingImages ? 'Sélectionnez jusqu’à quatre nouvelles images pour remplacer celles de l’annonce. Sans nouveau fichier, les images actuelles sont conservées.' : 'Sélectionnez jusqu’à quatre images JPG, PNG ou WebP (5 Mo maximum chacune). La première sera la couverture.' ?></small>
-        </label>
+        <div class="property-image-fields">
+            <span class="eyebrow">PHOTOS DU BIEN</span>
+            <small><?= $listingImages ? 'Choisissez une ou plusieurs nouvelles images pour remplacer celles enregistrées. Les champs laissés vides sont ignorés ; sans nouvelle image, les images actuelles sont conservées.' : 'Chaque champ accepte une seule image JPG, PNG ou WebP (5 Mo maximum). La première image est obligatoire et servira de couverture.' ?></small>
+            <?php for ($imageNumber = 1; $imageNumber <= 4; $imageNumber++): ?>
+                <label><?= $imageNumber === 1 ? 'Image principale' : 'Image complémentaire ' . $imageNumber ?>
+                    <input class="property-image-input" type="file" name="property_image_<?= $imageNumber ?>" accept="image/jpeg,image/png,image/webp" <?= !$listingImages && $imageNumber === 1 ? 'required' : '' ?>>
+                </label>
+            <?php endfor; ?>
+        </div>
         <div id="property-image-preview" class="upload-preview" aria-live="polite"></div>
         <?php if ($listingImages): ?>
             <div class="current-listing-images">
@@ -169,24 +197,43 @@ $fieldValue = static function (string $field, $default = '') use ($listing): str
     </form>
 </main>
 <script>
-    const imageInput = document.querySelector('#property-images');
     const imagePreview = document.querySelector('#property-image-preview');
-    imageInput.addEventListener('change', () => {
-        imagePreview.replaceChildren();
-        const files = Array.from(imageInput.files || []);
-        if (files.length > 4) {
-            imageInput.setCustomValidity('Choisissez quatre images maximum.');
-            imageInput.reportValidity();
-            imageInput.value = '';
-            return;
+    const imageInputs = document.querySelectorAll('.property-image-input');
+    const previewUrls = [];
+
+    const updateMainImageRequirement = () => {
+        if (imageInputs.length > 0) {
+            imageInputs[0].required = <?= $listingImages ? 'false' : 'true' ?> || Array.from(imageInputs).slice(1).some((input) => input.files.length > 0);
         }
-        imageInput.setCustomValidity('');
-        files.forEach((file, index) => {
-            const preview = document.createElement('img');
-            preview.src = URL.createObjectURL(file);
-            preview.alt = index === 0 ? 'Aperçu de l’image principale sélectionnée' : `Aperçu de l’image ${index + 1}`;
-            preview.onload = () => URL.revokeObjectURL(preview.src);
-            imagePreview.append(preview);
+    };
+
+    imageInputs.forEach((input) => {
+        input.addEventListener('change', () => {
+            previewUrls.forEach((url) => URL.revokeObjectURL(url));
+            previewUrls.length = 0;
+            imagePreview.replaceChildren();
+            updateMainImageRequirement();
+
+            imageInputs.forEach((selectedInput, selectedIndex) => {
+                const file = selectedInput.files[0];
+                if (!file) return;
+
+                if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+                    selectedInput.setCustomValidity('Choisissez une image JPG, PNG ou WebP de 5 Mo maximum.');
+                    selectedInput.reportValidity();
+                    selectedInput.value = '';
+                    selectedInput.setCustomValidity('');
+                    return;
+                }
+
+                selectedInput.setCustomValidity('');
+                const url = URL.createObjectURL(file);
+                previewUrls.push(url);
+                const preview = document.createElement('img');
+                preview.src = url;
+                preview.alt = selectedIndex === 0 ? 'Aperçu de l’image principale sélectionnée' : `Aperçu de l’image ${selectedIndex + 1}`;
+                imagePreview.append(preview);
+            });
         });
     });
 </script>

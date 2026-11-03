@@ -165,35 +165,32 @@ function save_property_photos(array $files): array
         return [];
     }
 
-    $names = $files['name'] ?? null;
-    $temporaryPaths = $files['tmp_name'] ?? null;
-    $sizes = $files['size'] ?? null;
-    $errors = $files['error'] ?? null;
-    if (!is_array($names) || !is_array($temporaryPaths) || !is_array($sizes) || !is_array($errors)
-        || count($names) !== count($temporaryPaths) || count($names) !== count($sizes) || count($names) !== count($errors)) {
-        throw new RuntimeException('Les images sélectionnées sont invalides. Réessayez.');
+    if (count($files) > 4) {
+        throw new RuntimeException('Choisissez quatre images maximum.');
     }
 
     $uploads = [];
-    foreach ($names as $index => $name) {
-        if (!is_string($name) || !isset($errors[$index]) || !is_int($errors[$index])) {
+    foreach ($files as $file) {
+        if (!is_array($file) || !isset($file['error']) || !is_int($file['error'])) {
             throw new RuntimeException('Les images sélectionnées sont invalides. Réessayez.');
         }
-        if ($errors[$index] === UPLOAD_ERR_NO_FILE) {
+        if ($file['error'] === UPLOAD_ERR_NO_FILE) {
             continue;
         }
-        if ($errors[$index] === UPLOAD_ERR_INI_SIZE || $errors[$index] === UPLOAD_ERR_FORM_SIZE) {
+        if ($file['error'] === UPLOAD_ERR_INI_SIZE || $file['error'] === UPLOAD_ERR_FORM_SIZE) {
             throw new RuntimeException('Chaque image doit faire 5 Mo maximum.');
         }
-        if ($errors[$index] !== UPLOAD_ERR_OK) {
+        if ($file['error'] !== UPLOAD_ERR_OK) {
             throw new RuntimeException('Le téléversement d’une image a échoué. Réessayez.');
         }
-        if (!is_string($temporaryPaths[$index] ?? null) || !is_int($sizes[$index] ?? null)
-            || !is_uploaded_file($temporaryPaths[$index]) || $sizes[$index] < 1 || $sizes[$index] > 5 * 1024 * 1024) {
+        $temporaryPath = $file['tmp_name'] ?? null;
+        $size = $file['size'] ?? null;
+        if (!is_string($temporaryPath) || !is_int($size) || !is_uploaded_file($temporaryPath)
+            || $size < 1 || $size > 5 * 1024 * 1024) {
             throw new RuntimeException('Chaque image doit faire 5 Mo maximum.');
         }
-        $imageInfo = getimagesize($temporaryPaths[$index]);
-        $mimeType = (new finfo(FILEINFO_MIME_TYPE))->file($temporaryPaths[$index]);
+        $imageInfo = getimagesize($temporaryPath);
+        $mimeType = (new finfo(FILEINFO_MIME_TYPE))->file($temporaryPath);
         $extensions = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
         if ($imageInfo === false || !isset($extensions[$mimeType]) || $imageInfo['mime'] !== $mimeType) {
             throw new RuntimeException('Choisissez des images valides au format JPG, PNG ou WebP.');
@@ -201,13 +198,10 @@ function save_property_photos(array $files): array
         if ($imageInfo[0] > 6000 || $imageInfo[1] > 6000) {
             throw new RuntimeException('Une image ne peut pas dépasser 6 000 pixels de côté.');
         }
-        $uploads[] = ['temporary_path' => $temporaryPaths[$index], 'extension' => $extensions[$mimeType]];
+        $uploads[] = ['temporary_path' => $temporaryPath, 'extension' => $extensions[$mimeType]];
     }
 
-    if (count($uploads) > 4) {
-        throw new RuntimeException('Choisissez quatre images maximum.');
-    }
-
+    // Keep uploaded files under the public images directory so listing image URLs work on the live site.
     $directory = __DIR__ . '/../images/properties';
     if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) {
         throw new RuntimeException('Le dossier des images d’annonces ne peut pas être créé.');
