@@ -1,6 +1,12 @@
 <?php
 $navUser = current_user();
 $navFlash = flash_message();
+$pendingVisitCount = 0;
+if (($navUser['role'] ?? '') === 'admin') {
+    $pendingVisitCount = (int) Database::connect()->query(
+        'SELECT COUNT(*) FROM property_visits WHERE agent_id IS NULL AND status = "scheduled"'
+    )->fetchColumn();
+}
 ?>
 <header class="site-header">
     <div class="nav-wrap navbar navbar-expand-lg">
@@ -18,7 +24,7 @@ $navFlash = flash_message();
             <div class="nav-actions">
                 <?php if ($navUser): ?>
                     <a class="nav-favorites" href="favoris.php">♡ <span>Favoris</span></a>
-                    <?php if (($navUser['role'] ?? '') === 'admin'): ?><a class="nav-admin" href="admin/index.php">Administration</a><?php endif; ?>
+                    <?php if (($navUser['role'] ?? '') === 'admin'): ?><a class="nav-admin" href="admin/portfolio.php">Gestion</a><a class="nav-admin" href="admin/sales.php">Ventes</a><a class="nav-admin" href="admin/visits.php">Visites<?= $pendingVisitCount ? ' · ' . $pendingVisitCount . ' à traiter' : '' ?></a><a class="nav-admin" href="admin/index.php">Administration</a><?php endif; ?>
                     <a class="nav-account" href="mon-espace.php"><?php if (!empty($navUser['profile_photo'])): ?><img class="avatar avatar-photo" src="<?= e($navUser['profile_photo']) ?>" alt=""><?php else: ?><span class="avatar"><?= e(strtoupper(substr($navUser['first_name'], 0, 1))) ?></span><?php endif; ?><span>Mon espace</span></a>
                     <form class="logout-form" action="deconnexion.php" method="post">
                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">

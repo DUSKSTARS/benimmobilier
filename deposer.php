@@ -5,6 +5,7 @@ $error = '';
 $editId = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
 $listing = null;
 $listingImages = [];
+$listingVideos = [];
 if (isset($_GET['id'])) {
     if (!$editId || $editId < 1) {
         http_response_code(404);
@@ -25,6 +26,14 @@ if (isset($_GET['id'])) {
     if (!$listingImages) {
         $listingImages = [$listing['image_url']];
     }
+    $videoQuery = Database::connect()->prepare(
+        'SELECT video_url FROM property_videos WHERE property_id = :property_id ORDER BY id'
+    );
+    $videoQuery->execute(['property_id' => $editId]);
+    $listingVideos = array_values(array_filter(
+        array_column($videoQuery->fetchAll(), 'video_url'),
+        static fn (string $path): bool => property_video_mime_type($path) !== null
+    ));
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -33,22 +42,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $description = trim(post_string('description'));
     $city = trim(post_string('city'));
     $district = trim(post_string('district'));
+    $address = trim(post_string('address'));
+    try {
+        [$latitude, $longitude] = parse_location_coordinates(
+            post_string('location_latitude'),
+            post_string('location_longitude')
+        );
+    } catch (RuntimeException $exception) {
+        $latitude = $longitude = null;
+        $error = $exception->getMessage();
+    }
     $transactionType = post_string('transaction_type');
     $propertyType = post_string('property_type');
     $price = filter_input(INPUT_POST, 'price', FILTER_VALIDATE_INT);
     $area = filter_input(INPUT_POST, 'area', FILTER_VALIDATE_INT);
     $bedrooms = filter_input(INPUT_POST, 'bedrooms', FILTER_VALIDATE_INT);
+    $livingRooms = filter_input(INPUT_POST, 'living_rooms', FILTER_VALIDATE_INT);
+    $bathrooms = filter_input(INPUT_POST, 'bathrooms', FILTER_VALIDATE_INT);
     $images = $listingImages;
     $newImages = [];
-    $validTypes = ['apartment', 'house', 'land', 'commercial'];
+    $newVideos = [];
+    $validTypes = ['apartment', 'house', 'land', 'commercial', 'villa', 'studio', 'office', 'shop', 'building'];
 
-    if ($title === '' || $description === '' || $city === '' || !in_array($transactionType, ['sale', 'rent'], true) || !in_array($propertyType, $validTypes, true)) {
+    if ($error === '' && $latitude === null) {
+        $error = 'Choisissez le point du bien sur la carte ou utilisez votre position actuelle.';
+    } elseif ($error === '' && ($title === '' || $description === '' || $city === '' || $address === ''
+        || !in_array($transactionType, ['sale', 'rent'], true) || !in_array($propertyType, $validTypes, true)
+    )) {
         $error = 'Complétez tous les champs obligatoires.';
-    } elseif ($price === false || $price < 1 || $area === false || $area < 1 || $bedrooms === false || $bedrooms < 0) {
-        $error = 'Le prix, la surface et le nombre de chambres doivent être valides.';
-    } elseif (strlen($title) > 160 || strlen($city) > 100 || strlen($district) > 100 || strlen($description) > 5000) {
+    } elseif ($error === '' && ($price === false || $price < 1 || $area === false || $area < 1
+        || $bedrooms === false || $bedrooms < 0 || $livingRooms === false || $livingRooms < 0
+        || $bathrooms === false || $bathrooms < 0)) {
+        $error = 'Le prix, la surface et le nombre de pièces doivent être valides.';
+    } elseif ($error === '' && (strlen($title) > 160 || strlen($city) > 100 || strlen($district) > 100
+        || strlen($address) > 255 || strlen($description) > 5000)) {
         $error = 'Certains champs dépassent la longueur autorisée.';
-    } else {
+    }
+
+    if ($error === '') {
         $imageUploads = [];
         for ($imageNumber = 1; $imageNumber <= 4; $imageNumber++) {
             $fieldName = 'property_image_' . $imageNumber;
@@ -70,12 +101,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Choisissez une image principale dans le premier champ.';
         }
 
-        try {
-            if ($error === '') {
+        if ($error === '') {
+            try {
                 $newImages = save_property_photos($imageUploads);
+                $newVideos = save_property_videos($_FILES['property_videos'] ?? []);
+            } catch (RuntimeException $exception) {
+                $error = $exception->getMessage();
+                delete_property_photos($newImages);
+                delete_property_videos($newVideos);
             }
-        } catch (RuntimeException $exception) {
-            $error = $exception->getMessage();
         }
         if ($error === '' && $newImages) {
             $images = $newImages;
@@ -87,8 +121,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db = Database::connect();
             $values = [
                 'title' => $title, 'description' => $description, 'city' => $city,
-                'district' => $district !== '' ? $district : null, 'transaction_type' => $transactionType,
-                'property_type' => $propertyType, 'price' => $price, 'area' => $area, 'bedrooms' => $bedrooms,
+                'district' => $district !== '' ? $district : null, 'address' => $address,
+                'location_latitude' => $latitude,
+                'location_longitude' => $longitude,
+                'transaction_type' => $transactionType, 'property_type' => $propertyType,
+                'price' => $price, 'area' => $area, 'bedrooms' => $bedrooms,
+                'living_rooms' => $livingRooms, 'bathrooms' => $bathrooms,
                 'image_url' => $images[0],
             ];
             $db->beginTransaction();
@@ -98,8 +136,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $values['user_id'] = $user['id'];
                     $statement = $db->prepare(
                         'UPDATE properties SET title = :title, description = :description, city = :city, district = :district,
+                            address = :address, location_latitude = :location_latitude,
+                            location_longitude = :location_longitude,
                             transaction_type = :transaction_type, property_type = :property_type, price = :price, area = :area,
-                            bedrooms = :bedrooms, image_url = :image_url, status = "pending",
+                            bedrooms = :bedrooms, living_rooms = :living_rooms, bathrooms = :bathrooms,
+                            image_url = :image_url, status = "pending",
                             rejection_reason = NULL, reviewed_by = NULL, reviewed_at = NULL
                          WHERE id = :id AND user_id = :user_id'
                     );
@@ -108,8 +149,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     $values['user_id'] = $user['id'];
                     $statement = $db->prepare(
-                        'INSERT INTO properties (user_id, title, description, city, district, transaction_type, property_type, price, area, bedrooms, image_url, status)
-                         VALUES (:user_id, :title, :description, :city, :district, :transaction_type, :property_type, :price, :area, :bedrooms, :image_url, "pending")'
+                        'INSERT INTO properties (user_id, title, description, city, district, address, location_latitude, location_longitude, transaction_type, property_type, price, area, bedrooms, living_rooms, bathrooms, image_url, status)
+                         VALUES (:user_id, :title, :description, :city, :district, :address, :location_latitude, :location_longitude, :transaction_type, :property_type, :price, :area, :bedrooms, :living_rooms, :bathrooms, :image_url, "pending")'
                     );
                     $statement->execute($values);
                     $propertyId = (int) $db->lastInsertId();
@@ -127,17 +168,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'position' => $index + 1,
                     ]);
                 }
+                if ($newVideos) {
+                    $db->prepare('DELETE FROM property_videos WHERE property_id = :property_id')
+                        ->execute(['property_id' => $propertyId]);
+                    $insertVideo = $db->prepare(
+                        'INSERT INTO property_videos (property_id, video_url) VALUES (:property_id, :video_url)'
+                    );
+                    foreach ($newVideos as $videoPath) {
+                        $insertVideo->execute(['property_id' => $propertyId, 'video_url' => $videoPath]);
+                    }
+                }
                 $db->commit();
             } catch (Throwable $exception) {
                 if ($db->inTransaction()) {
                     $db->rollBack();
                 }
                 delete_property_photos($newImages);
+                delete_property_videos($newVideos);
                 throw $exception;
             }
 
             if ($newImages) {
                 delete_property_photos($listingImages);
+            }
+            if ($newVideos) {
+                delete_property_videos($listingVideos);
             }
             $_SESSION['flash'] = [
                 'type' => 'success',
@@ -159,7 +214,7 @@ $fieldValue = static function (string $field, $default = '') use ($listing): str
 ?>
 <!DOCTYPE html>
 <html lang="fr">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Déposer une annonce — Habita</title><link rel="stylesheet" href="bootstrap-5.2.3-dist/css/bootstrap.min.css"><link rel="stylesheet" href="css/styles.css?v=9"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Déposer une annonce — Habita</title><link rel="stylesheet" href="bootstrap-5.2.3-dist/css/bootstrap.min.css"><link rel="stylesheet" href="css/styles.css?v=11"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"></head>
 <body>
 <?php require __DIR__ . '/nav.php'; ?>
 <main class="section page-section form-page">
@@ -170,9 +225,20 @@ $fieldValue = static function (string $field, $default = '') use ($listing): str
         <h2><?= $listing ? 'Modifier les détails du bien' : 'Les détails du bien' ?></h2>
         <label>Titre de l'annonce<input name="title" maxlength="160" required placeholder="Ex. Villa lumineuse avec jardin" value="<?= e($fieldValue('title')) ?>"></label>
         <label>Description<textarea name="description" rows="5" maxlength="5000" required placeholder="Racontez ce qui rend ce lieu unique…"><?= e($fieldValue('description')) ?></textarea></label>
-        <div class="form-row"><label>Type de transaction<select name="transaction_type" required><option value="sale" <?= $fieldValue('transaction_type', 'sale') === 'sale' ? 'selected' : '' ?>>À vendre</option><option value="rent" <?= $fieldValue('transaction_type') === 'rent' ? 'selected' : '' ?>>À louer</option></select></label><label>Type de bien<select name="property_type" required><option value="house" <?= $fieldValue('property_type', 'house') === 'house' ? 'selected' : '' ?>>Maison / villa</option><option value="apartment" <?= $fieldValue('property_type') === 'apartment' ? 'selected' : '' ?>>Appartement</option><option value="land" <?= $fieldValue('property_type') === 'land' ? 'selected' : '' ?>>Terrain</option><option value="commercial" <?= $fieldValue('property_type') === 'commercial' ? 'selected' : '' ?>>Local commercial</option></select></label></div>
+        <div class="form-row"><label>Type de transaction<select name="transaction_type" required><option value="sale" <?= $fieldValue('transaction_type', 'sale') === 'sale' ? 'selected' : '' ?>>À vendre</option><option value="rent" <?= $fieldValue('transaction_type') === 'rent' ? 'selected' : '' ?>>À louer</option></select></label><label>Type de bien<select name="property_type" required><?php foreach (['house' => 'Maison', 'apartment' => 'Appartement', 'land' => 'Terrain', 'villa' => 'Villa', 'studio' => 'Studio', 'office' => 'Bureau', 'shop' => 'Magasin', 'building' => 'Immeuble', 'commercial' => 'Local commercial'] as $typeValue => $typeLabel): ?><option value="<?= e($typeValue) ?>" <?= $fieldValue('property_type', 'house') === $typeValue ? 'selected' : '' ?>><?= e($typeLabel) ?></option><?php endforeach; ?></select></label></div>
         <div class="form-row"><label>Prix en FCFA<input type="number" name="price" min="1" step="1" required value="<?= e($fieldValue('price')) ?>"></label><label>Surface en m²<input type="number" name="area" min="1" step="1" required value="<?= e($fieldValue('area')) ?>"></label><label>Chambres<input type="number" name="bedrooms" min="0" step="1" required value="<?= e($fieldValue('bedrooms', '0')) ?>"></label></div>
+        <div class="form-row"><label>Salons<input type="number" name="living_rooms" min="0" step="1" required value="<?= e($fieldValue('living_rooms', '0')) ?>"></label><label>Salles de bains<input type="number" name="bathrooms" min="0" step="1" required value="<?= e($fieldValue('bathrooms', '0')) ?>"></label></div>
         <div class="form-row"><label>Ville<input name="city" maxlength="100" required placeholder="Ex. Cotonou" value="<?= e($fieldValue('city')) ?>"></label><label>Quartier<input name="district" maxlength="100" placeholder="Ex. Haie Vive" value="<?= e($fieldValue('district')) ?>"></label></div>
+        <label>Adresse complète<input name="address" maxlength="255" required placeholder="Rue, numéro, quartier" value="<?= e($fieldValue('address')) ?>"></label>
+        <div class="location-picker" data-location-picker>
+            <span class="optional">Localisation du bien</span>
+            <p class="map-help">Cliquez sur la carte pour choisir un point, ou utilisez votre position actuelle.</p>
+            <button class="button button-outline" type="button" data-use-current-location>Utiliser ma position actuelle</button>
+            <div class="property-map" data-map-canvas aria-label="Carte pour choisir la localisation"></div>
+            <p class="map-status" data-map-status aria-live="polite">Aucun point choisi.</p>
+            <input type="hidden" name="location_latitude" value="<?= e($fieldValue('location_latitude')) ?>">
+            <input type="hidden" name="location_longitude" value="<?= e($fieldValue('location_longitude')) ?>">
+        </div>
         <div class="property-image-fields">
             <span class="eyebrow">PHOTOS DU BIEN</span>
             <small><?= $listingImages ? 'Choisissez une ou plusieurs nouvelles images pour remplacer celles enregistrées. Les champs laissés vides sont ignorés ; sans nouvelle image, les images actuelles sont conservées.' : 'Chaque champ accepte une seule image JPG, PNG ou WebP (5 Mo maximum). La première image est obligatoire et servira de couverture.' ?></small>
@@ -193,6 +259,16 @@ $fieldValue = static function (string $field, $default = '') use ($listing): str
                 </div>
             </div>
         <?php endif; ?>
+        <div class="property-image-fields">
+            <span class="eyebrow">VIDÉOS DE PRÉSENTATION</span>
+            <small>Sélectionnez jusqu’à trois vidéos MP4, WebM ou OGG depuis votre appareil (100 Mo maximum chacune). Les vidéos actuelles restent si aucune nouvelle n’est choisie.</small>
+            <label>Fichiers vidéo<input type="file" name="property_videos[]" accept="video/mp4,video/webm,video/ogg" multiple></label>
+            <?php if ($listingVideos): ?>
+                <div class="video-preview-grid">
+                    <?php foreach ($listingVideos as $videoPath): ?><video controls preload="metadata"><source src="<?= e($videoPath) ?>" type="<?= e(property_video_mime_type($videoPath)) ?>"></video><?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </div>
         <button class="button button-dark" type="submit"><?= $listing ? 'Enregistrer les modifications' : 'Publier mon annonce' ?> <span aria-hidden="true">→</span></button>
     </form>
 </main>
@@ -237,6 +313,8 @@ $fieldValue = static function (string $field, $default = '') use ($listing): str
         });
     });
 </script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="js/location-map.js"></script>
 <?php require __DIR__ . '/footer.php'; ?>
 </body>
 </html>

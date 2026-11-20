@@ -30,7 +30,10 @@ if ($reference !== '') {
         exit('Paiement introuvable.');
     }
 } else {
-    $propertyQuery = $db->prepare('SELECT id, title, price, transaction_type FROM properties WHERE id = :id AND status = "published"');
+    $propertyQuery = $db->prepare(
+        'SELECT id, title, price, transaction_type FROM properties
+         WHERE id = :id AND status = "published" AND operational_status = "available"'
+    );
     $propertyQuery->execute(['id' => $propertyId]);
     $property = $propertyQuery->fetch();
     if (!$property) {

@@ -1,4 +1,4 @@
--- Select the target database in phpMyAdmin before importing this file.
+-- Select the target database in phpMyAdmin before importing this complete schema.
 SET NAMES utf8mb4;
 SET time_zone = '+00:00';
 
@@ -131,16 +131,299 @@ CREATE TABLE IF NOT EXISTS momo_payments (
     CONSTRAINT momo_payments_property_fk FOREIGN KEY (property_id) REFERENCES properties (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-DELETE FROM properties
-WHERE user_id IS NULL
-  AND title IN (
-    'Villa lumineuse avec jardin tropical',
-    'Appartement contemporain, prêt à vivre',
-    'Maison familiale au calme',
-    'Studio meublé au cœur de la ville',
-    'Terrain prêt pour votre projet',
-    'Appartement avec terrasse ensoleillée'
-);
-
 INSERT IGNORE INTO property_images (property_id, image_url, position)
 SELECT id, image_url, 1 FROM properties;
+
+-- Extend existing listings with operational and location details without changing moderation status.
+ALTER TABLE properties
+    MODIFY property_type ENUM('apartment', 'house', 'land', 'commercial', 'villa', 'studio', 'office', 'shop', 'building') NOT NULL,
+    ADD COLUMN IF NOT EXISTS address VARCHAR(255) DEFAULT NULL AFTER district,
+    ADD COLUMN IF NOT EXISTS location_url VARCHAR(1000) DEFAULT NULL AFTER address,
+    ADD COLUMN IF NOT EXISTS location_latitude DECIMAL(10,7) DEFAULT NULL AFTER location_url,
+    ADD COLUMN IF NOT EXISTS location_longitude DECIMAL(10,7) DEFAULT NULL AFTER location_latitude,
+    ADD COLUMN IF NOT EXISTS living_rooms TINYINT UNSIGNED NOT NULL DEFAULT 0 AFTER bedrooms,
+    ADD COLUMN IF NOT EXISTS bathrooms TINYINT UNSIGNED NOT NULL DEFAULT 0 AFTER living_rooms,
+    ADD COLUMN IF NOT EXISTS operational_status ENUM('available', 'reserved', 'rented', 'sold', 'maintenance') NOT NULL DEFAULT 'available' AFTER status,
+    ADD COLUMN IF NOT EXISTS owner_id BIGINT UNSIGNED DEFAULT NULL AFTER user_id;
+
+-- Keep real-estate owner records separate from marketplace login accounts.
+CREATE TABLE IF NOT EXISTS property_owners (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    first_name VARCHAR(80) NOT NULL,
+    last_name VARCHAR(80) NOT NULL,
+    email VARCHAR(190) DEFAULT NULL,
+    phone VARCHAR(40) DEFAULT NULL,
+    residence_address VARCHAR(255) DEFAULT NULL,
+    identity_number VARCHAR(100) DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY property_owners_name (last_name, first_name),
+    KEY property_owners_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Store confidential owner identity and supporting documents outside public media.
+CREATE TABLE IF NOT EXISTS owner_documents (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    owner_id BIGINT UNSIGNED NOT NULL,
+    document_type VARCHAR(80) NOT NULL,
+    original_name VARCHAR(255) NOT NULL,
+    stored_name CHAR(64) NOT NULL,
+    mime_type VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY owner_documents_owner (owner_id),
+    CONSTRAINT owner_documents_owner_fk FOREIGN KEY (owner_id) REFERENCES property_owners (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Register tenants and link occupancy to a property through dated rental contracts.
+CREATE TABLE IF NOT EXISTS tenants (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    first_name VARCHAR(80) NOT NULL,
+    last_name VARCHAR(80) NOT NULL,
+    email VARCHAR(190) DEFAULT NULL,
+    phone VARCHAR(40) DEFAULT NULL,
+    residence_address VARCHAR(255) DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY tenants_name (last_name, first_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS leases (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    property_id BIGINT UNSIGNED NOT NULL,
+    tenant_id BIGINT UNSIGNED NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    monthly_rent BIGINT UNSIGNED NOT NULL,
+    contract_reference VARCHAR(100) DEFAULT NULL,
+    status ENUM('active', 'ended', 'cancelled') NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY leases_property_dates (property_id, status, end_date),
+    KEY leases_tenant (tenant_id),
+    CONSTRAINT leases_property_fk FOREIGN KEY (property_id) REFERENCES properties (id) ON DELETE CASCADE,
+    CONSTRAINT leases_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Record rent collection, including unpaid and partially paid rent.
+CREATE TABLE IF NOT EXISTS rent_payments (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    lease_id BIGINT UNSIGNED NOT NULL,
+    due_date DATE NOT NULL,
+    amount_due BIGINT UNSIGNED NOT NULL,
+    amount_paid BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    paid_at DATE DEFAULT NULL,
+    note VARCHAR(500) DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY rent_payments_due (due_date, amount_due, amount_paid),
+    KEY rent_payments_lease (lease_id),
+    CONSTRAINT rent_payments_lease_fk FOREIGN KEY (lease_id) REFERENCES leases (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Preserve the actual date and amount of every partial or complete rent collection.
+CREATE TABLE IF NOT EXISTS rent_collections (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    rent_payment_id BIGINT UNSIGNED NOT NULL,
+    amount BIGINT UNSIGNED NOT NULL,
+    collected_at DATE NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY rent_collections_date (collected_at),
+    KEY rent_collections_payment (rent_payment_id),
+    CONSTRAINT rent_collections_payment_fk FOREIGN KEY (rent_payment_id) REFERENCES rent_payments (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Track property operating expenses independently from collected rent.
+CREATE TABLE IF NOT EXISTS property_expenses (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    property_id BIGINT UNSIGNED DEFAULT NULL,
+    category VARCHAR(100) NOT NULL,
+    amount BIGINT UNSIGNED NOT NULL,
+    expense_date DATE NOT NULL,
+    note VARCHAR(500) DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY property_expenses_date (expense_date),
+    KEY property_expenses_property (property_id),
+    CONSTRAINT property_expenses_property_fk FOREIGN KEY (property_id) REFERENCES properties (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Record sale proceeds and other non-rent income for financial reporting.
+CREATE TABLE IF NOT EXISTS income_entries (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    property_id BIGINT UNSIGNED DEFAULT NULL,
+    income_type ENUM('sale', 'other') NOT NULL,
+    amount BIGINT UNSIGNED NOT NULL,
+    income_date DATE NOT NULL,
+    note VARCHAR(500) DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY income_entries_date (income_date),
+    KEY income_entries_property (property_id),
+    CONSTRAINT income_entries_property_fk FOREIGN KEY (property_id) REFERENCES properties (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Keep a lightweight audit trail for management activity and status changes.
+CREATE TABLE IF NOT EXISTS property_activity (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    property_id BIGINT UNSIGNED DEFAULT NULL,
+    actor_id BIGINT UNSIGNED DEFAULT NULL,
+    activity VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY property_activity_recent (created_at),
+    KEY property_activity_property (property_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Support several validated presentation-video links per property.
+CREATE TABLE IF NOT EXISTS property_videos (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    property_id BIGINT UNSIGNED NOT NULL,
+    video_url VARCHAR(1000) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY property_videos_property (property_id),
+    CONSTRAINT property_videos_property_fk FOREIGN KEY (property_id) REFERENCES properties (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Keep buyer contact details reusable across negotiations, reservations, and sales.
+CREATE TABLE IF NOT EXISTS buyers (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    first_name VARCHAR(80) NOT NULL,
+    last_name VARCHAR(80) NOT NULL,
+    email VARCHAR(190) DEFAULT NULL,
+    phone VARCHAR(40) DEFAULT NULL,
+    address VARCHAR(255) DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY buyers_name (last_name, first_name),
+    KEY buyers_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Record each purchase offer and its outcome for a complete negotiation history.
+CREATE TABLE IF NOT EXISTS sale_negotiations (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    property_id BIGINT UNSIGNED NOT NULL,
+    buyer_id BIGINT UNSIGNED NOT NULL,
+    offer_amount BIGINT UNSIGNED NOT NULL,
+    notes TEXT DEFAULT NULL,
+    status ENUM('open', 'accepted', 'rejected', 'withdrawn') NOT NULL DEFAULT 'open',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY sale_negotiations_property (property_id, created_at),
+    KEY sale_negotiations_buyer (buyer_id),
+    CONSTRAINT sale_negotiations_property_fk FOREIGN KEY (property_id) REFERENCES properties (id) ON DELETE CASCADE,
+    CONSTRAINT sale_negotiations_buyer_fk FOREIGN KEY (buyer_id) REFERENCES buyers (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Track reservation dates, negotiated price, and lifecycle independently of listing moderation.
+CREATE TABLE IF NOT EXISTS property_reservations (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    property_id BIGINT UNSIGNED NOT NULL,
+    buyer_id BIGINT UNSIGNED NOT NULL,
+    agreed_price BIGINT UNSIGNED NOT NULL,
+    reserved_at DATETIME NOT NULL,
+    expires_at DATETIME NOT NULL,
+    status ENUM('active', 'converted', 'cancelled', 'expired') NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY property_reservations_property (property_id, status, expires_at),
+    KEY property_reservations_buyer (buyer_id),
+    CONSTRAINT property_reservations_property_fk FOREIGN KEY (property_id) REFERENCES properties (id) ON DELETE CASCADE,
+    CONSTRAINT property_reservations_buyer_fk FOREIGN KEY (buyer_id) REFERENCES buyers (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- One payment ledger covers reservation deposits and later sale installments.
+CREATE TABLE IF NOT EXISTS sale_payments (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    reservation_id BIGINT UNSIGNED DEFAULT NULL,
+    sale_id BIGINT UNSIGNED DEFAULT NULL,
+    amount BIGINT UNSIGNED NOT NULL,
+    payment_type ENUM('deposit', 'installment', 'balance') NOT NULL,
+    payment_method VARCHAR(80) DEFAULT NULL,
+    payment_reference VARCHAR(120) DEFAULT NULL,
+    paid_at DATETIME NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY sale_payments_reservation (reservation_id, paid_at),
+    KEY sale_payments_sale (sale_id, paid_at),
+    CONSTRAINT sale_payments_reservation_fk FOREIGN KEY (reservation_id) REFERENCES property_reservations (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Store each completed transfer and preserve its final agreed sale price.
+CREATE TABLE IF NOT EXISTS property_sales (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    property_id BIGINT UNSIGNED NOT NULL,
+    buyer_id BIGINT UNSIGNED NOT NULL,
+    reservation_id BIGINT UNSIGNED DEFAULT NULL,
+    sale_price BIGINT UNSIGNED NOT NULL,
+    sale_date DATE NOT NULL,
+    contract_reference VARCHAR(100) DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY property_sales_reservation_unique (reservation_id),
+    KEY property_sales_property (property_id, sale_date),
+    KEY property_sales_buyer (buyer_id),
+    CONSTRAINT property_sales_property_fk FOREIGN KEY (property_id) REFERENCES properties (id) ON DELETE RESTRICT,
+    CONSTRAINT property_sales_buyer_fk FOREIGN KEY (buyer_id) REFERENCES buyers (id) ON DELETE RESTRICT,
+    CONSTRAINT property_sales_reservation_fk FOREIGN KEY (reservation_id) REFERENCES property_reservations (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Link recorded sale payments to completed sales after the sale table has been created.
+SET @sale_payments_fk_exists = (
+    SELECT COUNT(*) FROM information_schema.referential_constraints
+    WHERE constraint_schema = DATABASE() AND table_name = 'sale_payments'
+      AND constraint_name = 'sale_payments_sale_fk'
+);
+SET @sale_payments_fk_sql = IF(
+    @sale_payments_fk_exists = 0,
+    'ALTER TABLE sale_payments ADD CONSTRAINT sale_payments_sale_fk FOREIGN KEY (sale_id) REFERENCES property_sales (id) ON DELETE CASCADE',
+    'SELECT 1'
+);
+PREPARE sale_payments_fk_statement FROM @sale_payments_fk_sql;
+EXECUTE sale_payments_fk_statement;
+DEALLOCATE PREPARE sale_payments_fk_statement;
+
+-- Persist prospect and assigned-agent contact information with every scheduled visit.
+CREATE TABLE IF NOT EXISTS real_estate_agents (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    first_name VARCHAR(80) NOT NULL,
+    last_name VARCHAR(80) NOT NULL,
+    email VARCHAR(190) DEFAULT NULL,
+    phone VARCHAR(40) DEFAULT NULL,
+    active TINYINT(1) NOT NULL DEFAULT 1,
+    portal_token_hash CHAR(64) DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY real_estate_agents_name (last_name, first_name),
+    KEY real_estate_agents_active (active),
+    UNIQUE KEY real_estate_agents_portal_token (portal_token_hash)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+ALTER TABLE real_estate_agents ADD COLUMN IF NOT EXISTS portal_token_hash CHAR(64) DEFAULT NULL;
+
+-- Store prospect details, visit outcomes, and follow-up information.
+CREATE TABLE IF NOT EXISTS property_visits (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    property_id BIGINT UNSIGNED NOT NULL,
+    agent_id BIGINT UNSIGNED DEFAULT NULL,
+    prospect_name VARCHAR(160) NOT NULL,
+    prospect_email VARCHAR(190) DEFAULT NULL,
+    prospect_phone VARCHAR(40) DEFAULT NULL,
+    scheduled_at DATETIME NOT NULL,
+    status ENUM('scheduled', 'confirmed', 'completed', 'cancelled') NOT NULL DEFAULT 'scheduled',
+    interested TINYINT(1) NOT NULL DEFAULT 0,
+    report TEXT DEFAULT NULL,
+    follow_up_note VARCHAR(500) DEFAULT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY property_visits_schedule (scheduled_at, status),
+    KEY property_visits_property (property_id, scheduled_at),
+    KEY property_visits_agent (agent_id, scheduled_at),
+    KEY property_visits_interested (interested, scheduled_at),
+    CONSTRAINT property_visits_property_fk FOREIGN KEY (property_id) REFERENCES properties (id) ON DELETE CASCADE,
+    CONSTRAINT property_visits_agent_fk FOREIGN KEY (agent_id) REFERENCES real_estate_agents (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+ALTER TABLE property_visits MODIFY agent_id BIGINT UNSIGNED DEFAULT NULL;

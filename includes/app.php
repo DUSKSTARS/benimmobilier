@@ -243,6 +243,113 @@ function delete_property_photos(array $paths): void
     }
 }
 
+function save_property_videos(array $files): array
+{
+    if (!$files || !isset($files['error']) || !is_array($files['error'])) {
+        return [];
+    }
+
+    $extensions = ['video/mp4' => 'mp4', 'video/webm' => 'webm', 'video/ogg' => 'ogv'];
+    $uploads = [];
+    foreach ($files['error'] as $index => $error) {
+        if (!is_int($error)) {
+            throw new RuntimeException('Les vidéos sélectionnées sont invalides. Réessayez.');
+        }
+        if ($error === UPLOAD_ERR_NO_FILE) {
+            continue;
+        }
+        if ($error === UPLOAD_ERR_INI_SIZE || $error === UPLOAD_ERR_FORM_SIZE) {
+            throw new RuntimeException('Chaque vidéo doit peser 100 Mo maximum.');
+        }
+        if ($error !== UPLOAD_ERR_OK) {
+            throw new RuntimeException('Le téléversement d’une vidéo a échoué. Réessayez.');
+        }
+
+        $temporaryPath = $files['tmp_name'][$index] ?? null;
+        $size = $files['size'][$index] ?? null;
+        if (!is_string($temporaryPath) || !is_int($size) || !is_uploaded_file($temporaryPath)
+            || $size < 1 || $size > 100 * 1024 * 1024) {
+            throw new RuntimeException('Chaque vidéo doit peser 100 Mo maximum.');
+        }
+        $mimeType = (new finfo(FILEINFO_MIME_TYPE))->file($temporaryPath);
+        if (!is_string($mimeType) || !isset($extensions[$mimeType])) {
+            throw new RuntimeException('Choisissez une vidéo valide au format MP4, WebM ou OGG.');
+        }
+        $uploads[] = ['temporary_path' => $temporaryPath, 'extension' => $extensions[$mimeType]];
+        if (count($uploads) > 3) {
+            throw new RuntimeException('Choisissez trois vidéos maximum par bien.');
+        }
+    }
+
+    $directory = __DIR__ . '/../videos/properties';
+    if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) {
+        throw new RuntimeException('Le dossier des vidéos ne peut pas être créé.');
+    }
+
+    $savedPaths = [];
+    try {
+        foreach ($uploads as $upload) {
+            $filename = bin2hex(random_bytes(24)) . '.' . $upload['extension'];
+            if (!move_uploaded_file($upload['temporary_path'], $directory . '/' . $filename)) {
+                throw new RuntimeException('Impossible d’enregistrer une vidéo. Vérifiez les permissions du dossier videos.');
+            }
+            $savedPaths[] = 'videos/properties/' . $filename;
+        }
+    } catch (Throwable $exception) {
+        delete_property_videos($savedPaths);
+        throw $exception;
+    }
+
+    return $savedPaths;
+}
+
+function delete_property_videos(array $paths): void
+{
+    $directory = realpath(__DIR__ . '/../videos/properties');
+    if ($directory === false) {
+        return;
+    }
+    foreach ($paths as $path) {
+        if (!is_string($path)
+            || !preg_match('~^videos/properties/[a-f0-9]{48}\.(mp4|webm|ogv)$~', $path)) {
+            continue;
+        }
+        $file = realpath(__DIR__ . '/../' . $path);
+        if ($file !== false && strpos($file, $directory . DIRECTORY_SEPARATOR) === 0 && is_file($file)) {
+            unlink($file);
+        }
+    }
+}
+
+function property_video_mime_type(string $path): ?string
+{
+    if (!preg_match('~^videos/properties/[a-f0-9]{48}\.(mp4|webm|ogv)$~', $path, $matches)) {
+        return null;
+    }
+
+    return ['mp4' => 'video/mp4', 'webm' => 'video/webm', 'ogv' => 'video/ogg'][$matches[1]];
+}
+
+function parse_location_coordinates(string $latitudeInput, string $longitudeInput): array
+{
+    if ($latitudeInput === '' && $longitudeInput === '') {
+        return [null, null];
+    }
+    if ($latitudeInput === '' || $longitudeInput === '') {
+        throw new RuntimeException('Choisissez un point complet sur la carte ou utilisez votre position actuelle.');
+    }
+
+    $latitude = filter_var($latitudeInput, FILTER_VALIDATE_FLOAT);
+    $longitude = filter_var($longitudeInput, FILTER_VALIDATE_FLOAT);
+    if ((!is_float($latitude) && !is_int($latitude)) || (!is_float($longitude) && !is_int($longitude))
+        || !is_finite((float) $latitude) || !is_finite((float) $longitude)
+        || $latitude < -90 || $latitude > 90 || $longitude < -180 || $longitude > 180) {
+        throw new RuntimeException('Le point choisi sur la carte est invalide.');
+    }
+
+    return [(float) $latitude, (float) $longitude];
+}
+
 function send_account_unlock_code(PDO $db, array $account): void
 {
     $host = getenv('MAIL_HOST');

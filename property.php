@@ -8,7 +8,9 @@ if (!$propertyId || $propertyId < 1) {
 }
 
 $isAdmin = $user !== null && ($user['role'] ?? '') === 'admin';
-$visibilityCondition = $isAdmin ? '' : ' AND p.status = "published"';
+$visibilityCondition = $isAdmin
+    ? ''
+    : ' AND p.status = "published" AND p.operational_status IN ("available", "reserved")';
 $statement = Database::connect()->prepare(
     'SELECT p.*, u.first_name, u.last_name, u.bio, u.email AS owner_email,
         (SELECT COUNT(*) FROM favorites f WHERE f.property_id = p.id) AS favorite_count
@@ -32,6 +34,15 @@ if (!$galleryImages) {
 } else {
     $property['image_url'] = $galleryImages[0];
 }
+$videosQuery = Database::connect()->prepare(
+    'SELECT video_url FROM property_videos WHERE property_id = :property_id ORDER BY id'
+);
+$videosQuery->execute(['property_id' => $propertyId]);
+$propertyVideos = array_column($videosQuery->fetchAll(), 'video_url');
+$propertyVideos = array_values(array_filter(
+    $propertyVideos,
+    static fn (string $path): bool => property_video_mime_type($path) !== null
+));
 
 $isFavorite = false;
 if ($user) {
@@ -43,12 +54,16 @@ if ($user) {
     $favoriteQuery->execute(['guest_token' => guest_favorite_token(), 'property_id' => $propertyId]);
     $isFavorite = (bool) $favoriteQuery->fetchColumn();
 }
-$typeLabels = ['apartment' => 'Appartement', 'house' => 'Maison / villa', 'land' => 'Terrain', 'commercial' => 'Local commercial'];
+$typeLabels = [
+    'apartment' => 'Appartement', 'house' => 'Maison', 'land' => 'Terrain',
+    'villa' => 'Villa', 'studio' => 'Studio', 'office' => 'Bureau',
+    'shop' => 'Magasin', 'building' => 'Immeuble', 'commercial' => 'Local commercial',
+];
 $returnTo = 'property.php?id=' . (int) $propertyId;
 ?>
 <!DOCTYPE html>
 <html lang="fr">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title><?= e($property['title']) ?> — Habita</title><link rel="stylesheet" href="bootstrap-5.2.3-dist/css/bootstrap.min.css"><link rel="stylesheet" href="css/styles.css?v=9"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title><?= e($property['title']) ?> — Habita</title><link rel="stylesheet" href="bootstrap-5.2.3-dist/css/bootstrap.min.css"><link rel="stylesheet" href="css/styles.css?v=11"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"></head>
 <body>
 <?php require __DIR__ . '/nav.php'; ?>
 <main class="section page-section detail-page">
@@ -57,7 +72,7 @@ $returnTo = 'property.php?id=' . (int) $propertyId;
         <button class="detail-hero-image" type="button" data-gallery-image="<?= e($property['image_url']) ?>" data-gallery-alt="<?= e($property['title']) ?>" aria-label="Agrandir l’image principale">
             <img src="<?= e($property['image_url']) ?>" alt="<?= e($property['title']) ?>">
         </button>
-        <span class="property-badge"><?= $property['transaction_type'] === 'rent' ? 'À LOUER' : 'À VENDRE' ?></span>
+        <span class="property-badge"><?= $property['operational_status'] === 'reserved' ? 'RÉSERVÉ' : ($property['transaction_type'] === 'rent' ? 'À LOUER' : 'À VENDRE') ?></span>
         <?php if ($isAdmin && $property['status'] !== 'published'): ?><span class="property-badge detail-status-badge">ADMIN · <?= e(strtoupper($property['status'])) ?></span><?php endif; ?>
     </div>
     <?php if (count($galleryImages) > 1): ?>
@@ -73,9 +88,16 @@ $returnTo = 'property.php?id=' . (int) $propertyId;
         <article class="detail-content">
             <div class="detail-location"><span aria-hidden="true">⌖</span> <?= e($property['city']) ?><?= $property['district'] ? ' · ' . e($property['district']) : '' ?></div>
             <h1><?= e($property['title']) ?></h1>
-            <div class="detail-facts"><span><?= (int) $property['area'] ?> m²</span><span><?= (int) $property['bedrooms'] ?> chambres</span><span><?= e($typeLabels[$property['property_type']] ?? $property['property_type']) ?></span></div>
+            <div class="detail-facts"><span><?= (int) $property['area'] ?> m²</span><span><?= (int) $property['bedrooms'] ?> chambres</span><span><?= (int) $property['living_rooms'] ?> salons</span><span><?= (int) $property['bathrooms'] ?> salles de bains</span><span><?= e($typeLabels[$property['property_type']] ?? $property['property_type']) ?></span></div>
+            <?php if ($property['address']): ?><p class="detail-address"><?= e($property['address']) ?></p><?php endif; ?>
+            <?php if ($property['location_latitude'] !== null && $property['location_longitude'] !== null): ?>
+                <section class="detail-description"><h2>Localisation</h2><div class="property-map detail-map" data-property-map data-latitude="<?= e($property['location_latitude']) ?>" data-longitude="<?= e($property['location_longitude']) ?>"><div data-map-canvas aria-label="Carte de localisation du bien"></div></div></section>
+            <?php elseif ($property['location_url']): ?>
+                <p class="detail-address"><a href="<?= e($property['location_url']) ?>" target="_blank" rel="noopener noreferrer">Voir l’ancienne localisation ↗</a></p>
+            <?php endif; ?>
             <?php if ($isAdmin && $property['rejection_reason']): ?><p class="rejection-note"><strong>Motif de refus :</strong> <?= e($property['rejection_reason']) ?></p><?php endif; ?>
             <section class="detail-description"><h2>À propos de ce lieu</h2><p><?= nl2br(e($property['description'])) ?></p></section>
+            <?php if ($propertyVideos): ?><section class="detail-description"><h2>Vidéos de présentation</h2><div class="video-preview-grid"><?php foreach ($propertyVideos as $videoPath): ?><video controls preload="metadata"><source src="<?= e($videoPath) ?>" type="<?= e(property_video_mime_type($videoPath)) ?>">Votre navigateur ne peut pas lire cette vidéo.</video><?php endforeach; ?></div></section><?php endif; ?>
             <section class="seller-card">
                 <div class="seller-avatar"><?= e(strtoupper(substr($property['first_name'] ?: 'H', 0, 1))) ?></div>
                 <div><span class="eyebrow">VOTRE CONTACT</span><strong><?= e(trim(($property['first_name'] ?? '') . ' ' . ($property['last_name'] ?? '')) ?: 'Équipe Habita') ?></strong><p><?= e($property['bio'] ?: 'À votre écoute pour vous accompagner dans votre projet.') ?></p></div>
@@ -93,7 +115,8 @@ $returnTo = 'property.php?id=' . (int) $propertyId;
                     <input type="hidden" name="return_to" value="<?= e($returnTo) ?>">
                     <button class="button favorite-toggle-button <?= $isFavorite ? 'is-favorite button-outline' : 'button-dark' ?> button-full" type="submit" aria-pressed="<?= $isFavorite ? 'true' : 'false' ?>"><?= $isFavorite ? '♥  Ne plus aimer' : '♡  J’aime cet article' ?></button>
                 </form>
-                <?php if (!$isAdmin): ?><a class="button button-outline button-full contact-button" href="paiement-momo.php?id=<?= (int) $property['id'] ?>">Réserver avec un acompte MoMo (10 %)</a><?php endif; ?>
+                <?php if (!$isAdmin && $property['operational_status'] === 'available'): ?><a class="button button-outline button-full contact-button" href="paiement-momo.php?id=<?= (int) $property['id'] ?>">Réserver avec un acompte MoMo (10 %)</a><?php endif; ?>
+                <?php if (!$isAdmin): ?><a class="button button-dark button-full contact-button" href="visite.php?id=<?= (int) $property['id'] ?>">Demander une visite</a><?php endif; ?>
             <?php endif; ?>
             <?php if ($property['status'] === 'published' && !empty($property['owner_email'])): ?>
                 <a class="button button-outline button-full contact-button" href="mailto:<?= e($property['owner_email']) ?>?subject=<?= rawurlencode('À propos du bien : ' . $property['title']) ?>">Contacter le propriétaire</a>
@@ -125,6 +148,8 @@ $returnTo = 'property.php?id=' . (int) $propertyId;
         if (event.target === zoomDialog) zoomDialog.close();
     });
 </script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="js/location-map.js"></script>
 <?php require __DIR__ . '/footer.php'; ?>
 </body>
 </html>

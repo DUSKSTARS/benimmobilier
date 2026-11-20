@@ -13,7 +13,7 @@ if ($user) {
 <article class="property-card">
     <a class="property-image-link" href="property.php?id=<?= (int) $property['id'] ?>">
         <img class="property-image" src="<?= e($property['image_url']) ?>" alt="<?= e($property['title']) ?>" loading="lazy">
-        <span class="property-badge"><?= $property['transaction_type'] === 'rent' ? 'À LOUER' : 'À VENDRE' ?></span>
+        <span class="property-badge"><?= $property['operational_status'] === 'reserved' ? 'RÉSERVÉ' : ($property['transaction_type'] === 'rent' ? 'À LOUER' : 'À VENDRE') ?></span>
     </a>
     <form class="favorite-form" action="favoris.php" method="post">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -27,5 +27,6 @@ if ($user) {
         <div class="property-location"><span aria-hidden="true">⌖</span> <?= e($property['city']) ?><?= $property['district'] ? ', ' . e($property['district']) : '' ?></div>
         <div class="property-features"><span><?= (int) $property['bedrooms'] ?> chambres</span><span><?= (int) $property['area'] ?> m²</span><span><span data-favorite-count="<?= (int) $property['id'] ?>"><?= (int) $property['favorite_count'] ?></span> ♥</span></div>
         <?php if (!empty($property['user_id'])): ?><a class="property-owner" href="profil.php?id=<?= (int) $property['user_id'] ?>">Par <?= e(trim(($property['first_name'] ?? '') . ' ' . ($property['last_name'] ?? ''))) ?></a><?php else: ?><span class="property-owner">Sélection Habita</span><?php endif; ?>
+        <a class="property-visit-link" href="visite.php?id=<?= (int) $property['id'] ?>">Demander une visite</a>
     </div>
 </article>

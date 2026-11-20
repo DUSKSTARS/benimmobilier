@@ -5,7 +5,7 @@ $search = isset($_GET['q']) && is_string($_GET['q']) ? trim($_GET['q']) : '';
 $type = $_GET['type'] ?? '';
 $minPrice = filter_input(INPUT_GET, 'min_price', FILTER_VALIDATE_INT);
 $minPrice = is_int($minPrice) ? max(5000, $minPrice) : 5000;
-$conditions = ["p.status = 'published'"];
+$conditions = ["p.status = 'published'", "p.operational_status IN ('available', 'reserved')"];
 $parameters = [];
 
 if ($search !== '') {
@@ -41,7 +41,7 @@ $user = current_user();
     <meta name="description" content="Trouvez votre prochain chez-vous parmi une sélection de biens immobiliers.">
     <title>Habita — Trouvez votre prochain chez-vous</title>
     <link rel="stylesheet" href="bootstrap-5.2.3-dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="css/styles.css?v=9">
+    <link rel="stylesheet" href="css/styles.css?v=11">
 </head>
 <body>
 <?php require __DIR__ . '/nav.php'; ?>

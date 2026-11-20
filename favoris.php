@@ -11,7 +11,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $db = Database::connect();
-    $exists = $db->prepare('SELECT id FROM properties WHERE id = :id AND status = "published"');
+    $exists = $db->prepare(
+        'SELECT id FROM properties WHERE id = :id AND status = "published"
+         AND operational_status IN ("available", "reserved")'
+    );
     $exists->execute(['id' => $propertyId]);
     if (!$exists->fetchColumn()) {
         http_response_code(404);
@@ -86,6 +89,7 @@ $statement = Database::connect()->prepare(
      JOIN properties p ON p.id = mine.property_id
      LEFT JOIN users u ON u.id = p.user_id
      WHERE mine.user_id = :user_id AND p.status = "published"
+       AND p.operational_status IN ("available", "reserved")
      ORDER BY mine.created_at DESC'
 );
 $statement->execute(['user_id' => $user['id']]);

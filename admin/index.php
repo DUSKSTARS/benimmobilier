@@ -2,6 +2,18 @@
 require_once __DIR__ . '/../includes/app.php';
 $admin = require_admin();
 $db = Database::connect();
+$pendingVisitCount = (int) $db->query(
+    'SELECT COUNT(*) FROM property_visits WHERE agent_id IS NULL AND status = "scheduled"'
+)->fetchColumn();
+$propertyTypeLabels = [
+    'house' => 'Maison', 'apartment' => 'Appartement', 'land' => 'Terrain',
+    'villa' => 'Villa', 'studio' => 'Studio', 'office' => 'Bureau',
+    'shop' => 'Magasin', 'building' => 'Immeuble', 'commercial' => 'Local commercial',
+];
+$propertyStatusLabels = [
+    'available' => 'Disponible', 'reserved' => 'Réservé', 'rented' => 'Loué',
+    'sold' => 'Vendu', 'maintenance' => 'En travaux',
+];
 
 $counts = $db->query(
     "SELECT COUNT(*) AS all_count,
@@ -54,7 +66,10 @@ $flash = flash_message();
     <div class="nav-wrap">
         <a class="brand" href="../index.php"><span class="brand-mark">h</span>habita<span class="brand-dot">.</span></a>
         <nav class="nav-actions" aria-label="Administration">
-            <a class="nav-admin" href="index.php">Administration</a>
+            <a class="nav-admin" href="portfolio.php">Gestion immobilière</a>
+            <a class="nav-admin" href="sales.php">Ventes</a>
+            <a class="nav-admin" href="visits.php">Visites<?= $pendingVisitCount ? ' · ' . $pendingVisitCount . ' à traiter' : '' ?></a>
+            <a class="nav-admin" href="index.php">Modération</a>
             <a class="nav-account" href="../mon-espace.php">Mon espace</a>
             <form action="../deconnexion.php" method="post">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -89,7 +104,7 @@ $flash = flash_message();
                     <img src="<?= e($imageSource) ?>" alt="" loading="lazy">
                     <div class="admin-listing-info">
                         <strong><?= e($property['title']) ?></strong>
-                        <span><?= e($property['city']) ?><?= $property['district'] ? ' · ' . e($property['district']) : '' ?> · <?= e(format_price($property['price'], $property['transaction_type'])) ?> · <?= e(ucfirst($property['property_type'])) ?> · <?= (int) $property['area'] ?> m² · <?= (int) $property['bedrooms'] ?> chambres</span>
+                        <span><?= e($property['city']) ?><?= $property['district'] ? ' · ' . e($property['district']) : '' ?> · <?= e(format_price($property['price'], $property['transaction_type'])) ?> · <?= e($propertyTypeLabels[$property['property_type']] ?? $property['property_type']) ?> · <?= (int) $property['area'] ?> m² · <?= (int) $property['bedrooms'] ?> chambres · <?= e($propertyStatusLabels[$property['operational_status']] ?? $property['operational_status']) ?></span>
                         <span class="admin-description"><?= nl2br(e($property['description'])) ?></span>
                         <span class="status-pill status-<?= e($property['status']) ?>"><?= $property['status'] === 'published' ? 'En ligne' : ($property['status'] === 'pending' ? 'À valider' : ($property['status'] === 'rejected' ? 'Refusée' : 'Archivée')) ?></span>
                         <span>Déposée le <?= e(date('d/m/Y à H:i', strtotime($property['created_at']))) ?> · <?= (int) $property['favorite_count'] ?> favori(s)</span>

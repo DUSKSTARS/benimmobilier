@@ -18,7 +18,8 @@ $listingQuery = Database::connect()->prepare(
     'SELECT p.*, u.first_name, u.last_name,
         (SELECT COUNT(*) FROM favorites f WHERE f.property_id = p.id) AS favorite_count
      FROM properties p LEFT JOIN users u ON u.id = p.user_id
-     WHERE p.user_id = :user_id AND p.status = "published" ORDER BY p.created_at DESC'
+     WHERE p.user_id = :user_id AND p.status = "published"
+       AND p.operational_status IN ("available", "reserved") ORDER BY p.created_at DESC'
 );
 $listingQuery->execute(['user_id' => $profileId]);
 $properties = $listingQuery->fetchAll();
